@@ -1,5 +1,70 @@
 # Solvency Verification Service - SOAP/WSDL Implementation
 
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Spyne](https://img.shields.io/badge/SOAP-Spyne%20%2B%20Zeep-6A1B9A)](http://spyne.io/)
+[![WSDL](https://img.shields.io/badge/WSDL%201.1-document%2Fliteral-555)](contracts/SolvencyVerification.wsdl)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Prometheus](https://img.shields.io/badge/Prometheus-metrics-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
+[![Grafana](https://img.shields.io/badge/Grafana-dashboard-F46800?logo=grafana&logoColor=white)](grafana-dashboard.json)
+[![Docker](https://img.shields.io/badge/Docker%20Compose-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+
+*SOA course project (TD1) — author: [@khaledbouabdallah](https://github.com/khaledbouabdallah)*
+
+```mermaid
+flowchart LR
+    C(["🧾 SOAP client<br/>SoapUI · zeep"]) -->|VerifySolvency| O["🎛️ Orchestrator :8000<br/>SolvencyVerificationService<br/>+ TTL / LRU cache"]
+    subgraph CRUD["🗄️ CRUD services (internal)"]
+        CD["ClientDirectoryService<br/>GetClientIdentity"]
+        FD["FinancialDataService<br/>GetClientFinancials"]
+        CB["CreditBureauService<br/>GetClientCreditHistory"]
+    end
+    subgraph BL["🧮 Business-logic services (internal)"]
+        CS["CreditScoringService<br/>ComputeCreditScore"]
+        SD["SolvencyDecisionService<br/>DecideSolvency"]
+        EX["ExplanationService<br/>Explain"]
+    end
+    O -->|SOAP| CD & FD & CB
+    O -->|SOAP| CS & SD & EX
+    CD & FD & CB --> DB[("🐘 PostgreSQL")]
+    O & CRUD & BL -. /prometheus .-> P["📈 Prometheus"] --> G["📊 Grafana"]
+```
+
+### Request flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant O as Orchestrator
+    participant K as Cache
+    participant R as CRUD services
+    participant B as Business services
+
+    C->>O: VerifySolvencyRequest(clientId)
+    O->>K: identity / financials / credit history?
+    alt cache hit
+        K-->>O: cached data
+    else miss
+        O->>R: GetClientIdentity · GetClientFinancials · GetClientCreditHistory
+        R-->>O: data
+        O->>K: store (TTL 300 s)
+    end
+    O->>B: ComputeCreditScore(debt, latePayments, bankruptcy)
+    B-->>O: score
+    O->>B: DecideSolvency(income, expenses, score)
+    B-->>O: solvent / not_solvent
+    O->>B: Explain(...)
+    B-->>O: human-readable reasons
+    O-->>C: SolvencyReport (correlation id)
+```
+
+### Business rules
+
+| Service | Rule |
+|---|---|
+| Credit score | `score = 1000 − 0.1 × debt − 50 × latePayments − (bankruptcy ? 200 : 0)`, clamped to [0, 1000] |
+| Solvency | **solvent** ⇔ `score ≥ 700` **and** `monthlyIncome > monthlyExpenses` |
+
 A microservices-based loan solvency verification system using SOAP/WSDL, implementing SOA principles with separate CRUD, business logic, and orchestration layers. Includes production-grade monitoring with Prometheus and Grafana, plus intelligent caching for performance optimization.
 
 ## Architecture Overview
